@@ -157,3 +157,208 @@ async function verifyOrder(orderId) {
     
     // ... rest of your code ...
 }
+
+// cloud-storage.js
+class CloudStorage {
+    constructor() {
+        this.STORAGE_KEY = 'tastybites_orders';
+        this.SYNC_INTERVAL = 5000; // 5 seconds
+        this.lastSync = null;
+        this.isSyncing = false;
+    }
+
+    // Initialize storage
+    async init() {
+        try {
+            // Initialize IndexedDB
+            await idbKeyVal.set('initialized', true);
+            console.log('Cloud storage initialized');
+            return true;
+        } catch (error) {
+            console.error('Failed to initialize storage:', error);
+            return false;
+        }
+    }
+
+    // Save order to cloud storage
+    async saveOrder(order) {
+        try {
+            // Generate unique ID if not exists
+            if (!order.id) {
+                order.id = 'order_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+                order.createdAt = new Date().toISOString();
+            }
+
+            // Update timestamp
+            order.updatedAt = new Date().toISOString();
+
+            // Get existing orders
+            const existingOrders = await this.getOrders();
+            
+            // Check if order already exists
+            const existingIndex = existingOrders.findIndex(o => o.id === order.id);
+            
+            if (existingIndex >= 0) {
+                // Update existing order
+                existingOrders[existingIndex] = order;
+            } else {
+                // Add new order
+                existingOrders.push(order);
+            }
+
+            // Save to IndexedDB
+            await idbKeyVal.set(this.STORAGE_KEY, existingOrders);
+            
+            // Also save to localStorage as backup
+            localStorage.setItem(this.STORAGE_KEY, JSON.stringify(existingOrders));
+            
+            console.log('Order saved to cloud storage:', order.id);
+            return order.id;
+        } catch (error) {
+            console.error('Failed to save order:', error);
+            throw error;
+        }
+    }
+
+    // Get all orders from cloud storage
+    async getOrders() {
+        try {
+            // Try IndexedDB first
+            let orders = await idbKeyVal.get(this.STORAGE_KEY);
+            
+            if (!orders) {
+                // Fallback to localStorage
+                const localData = localStorage.getItem(this.STORAGE_KEY);
+                orders = localData ? JSON.parse(localData) : [];
+                
+                // Save to IndexedDB for next time
+                if (orders.length > 0) {
+                    await idbKeyVal.set(this.STORAGE_KEY, orders);
+                }
+            }
+            
+            return orders || [];
+        } catch (error) {
+            console.error('Failed to get orders:', error);
+            return [];
+        }
+    }
+
+    // Get orders by status
+    async getOrdersByStatus(status) {
+        const allOrders = await this.getOrders();
+        return allOrders.filter(order => order.status === status);
+    }
+
+    // Update order status
+    async updateOrderStatus(orderId, status, deliveryCode = null) {
+        try {
+            const allOrders = await this.getOrders();
+            const orderIndex = allOrders.findIndex(order => order.id === orderId);
+            
+            if (orderIndex >= 0) {
+                allOrders[orderIndex].status = status;
+                allOrders[orderIndex].updatedAt = new Date().toISOString();
+                
+                if (deliveryCode) {
+                    allOrders[orderIndex].deliveryCode = deliveryCode;
+                }
+                
+                if (status === 'verified') {
+                    allOrders[orderIndex].paymentVerified = true;
+                    allOrders[orderIndex].verifiedAt = new Date().toISOString();
+                }
+                
+                await idbKeyVal.set(this.STORAGE_KEY, allOrders);
+                localStorage.setItem(this.STORAGE_KEY, JSON.stringify(allOrders));
+                
+                console.log(`Order ${orderId} updated to status: ${status}`);
+                return true;
+            }
+            
+            return false;
+        } catch (error) {
+            console.error('Failed to update order:', error);
+            return false;
+        }
+    }
+
+    // Sync between tabs/devices
+    setupCrossTabSync() {
+        // Listen for storage changes
+        window.addEventListener('storage', async (event) => {
+            if (event.key === this.STORAGE_KEY && !this.isSyncing) {
+                this.isSyncing = true;
+                await this.syncOrders();
+                this.isSyncing = false;
+                this.showSyncNotification();
+            }
+        });
+    }
+
+    // Manual sync
+    async syncOrders() {
+        try {
+            const localOrders = await this.getOrders();
+            console.log('Orders synced:', localOrders.length);
+            return localOrders;
+        } catch (error) {
+            console.error('Sync failed:', error);
+            return [];
+        }
+    }
+
+    // Show sync notification
+    showSyncNotification() {
+        const notification = document.getElementById('syncNotification');
+        if (notification) {
+            notification.classList.add('show');
+            setTimeout(() => {
+                notification.classList.remove('show');
+            }, 3000);
+        }
+    }
+
+    // Delete order
+    async deleteOrder(orderId) {
+        try {
+            const allOrders = await this.getOrders();
+            const filteredOrders = allOrders.filter(order => order.id !== orderId);
+            
+            await idbKeyVal.set(this.STORAGE_KEY, filteredOrders);
+            localStorage.setItem(this.STORAGE_KEY, JSON.stringify(filteredOrders));
+            
+            console.log(`Order ${orderId} deleted`);
+            return true;
+        } catch (error) {
+            console.error('Failed to delete order:', error);
+            return false;
+        }
+    }
+
+    // Clear all orders (for testing)
+    async clearAllOrders() {
+        try {
+            await idbKeyVal.set(this.STORAGE_KEY, []);
+            localStorage.removeItem(this.STORAGE_KEY);
+            console.log('All orders cleared');
+            return true;
+        } catch (error) {
+            console.error('Failed to clear orders:', error);
+            return false;
+        }
+    }
+}
+
+// Initialize global cloud storage instance
+window.cloudStorage = new CloudStorage();
+
+// Initialize when document is ready
+document.addEventListener('DOMContentLoaded', async () => {
+    await window.cloudStorage.init();
+    window.cloudStorage.setupCrossTabSync();
+    
+    // Test the storage
+    const testOrders = await window.cloudStorage.getOrders();
+    console.log('Cloud storage ready. Orders found:', testOrders.length);
+});
