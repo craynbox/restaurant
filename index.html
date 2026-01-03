@@ -7,7 +7,10 @@
     <title>TastyBites | Restaurant & Delivery</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&family=Playfair+Display:wght@700;800&display=swap" rel="stylesheet">
-    <style>
+   <!-- Add these lines to your <head> section -->
+<script src="https://cdn.jsdelivr.net/npm/idb-keyval@6/dist/umd.js"></script>
+<script src="cloud-storage.js"></script>
+   <style>
         /* ===== BASE STYLES ===== */
         * {
             margin: 0;
@@ -3692,7 +3695,7 @@
             }
         ];
 
-        let announcements = JSON.parse(localStorage.getItem('announcements')) || [
+       let announcements = JSON.parse(localStorage.getItem('announcements')) || [
             {
                 id: 1,
                 text: "🎉 Special Offer: Get 20% off on all orders above $30!",
@@ -3707,9 +3710,11 @@
             }
         ];
 
-        let cart = JSON.parse(localStorage.getItem('cart')) || [];
-        let orders = JSON.parse(localStorage.getItem('orders')) || [];
-        let pendingOrders = JSON.parse(localStorage.getItem('pendingOrders')) || [];
+
+         let cart = JSON.parse(localStorage.getItem('cart')) || [];
+            let orders = [];
+            let pendingOrders = [];
+ 
         let adminCredentials = JSON.parse(localStorage.getItem('adminCredentials')) || {
             username: 'admin',
             password: 'tastybites2023',
@@ -5579,9 +5584,21 @@
             }
         `;
         document.head.appendChild(style);
+
+              // Load data from cloud on startup
+document.addEventListener('DOMContentLoaded', async function() {
+    await loadOrderData();
+    // ... rest of your initialization code ...
+    
+    // Start auto-refresh
+    startAutoRefresh();
+});
     </script>
     <script src="/script.js"></script>
-    <!--<script src="admin.js"></script>-->
+    <script src="admin.js"></script>
+    <!-- Add this line BEFORE your main script tag -->
+<script src="https://cdn.jsdelivr.net/npm/idb-keyval@6/dist/umd.js"></script>
+<script src="cloud-storage.js"></script>
 </body>
 
 </html>
