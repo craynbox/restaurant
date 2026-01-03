@@ -3805,12 +3805,7 @@
                         // Order has been verified
                         showDeliveryCodeToCustomer(currentOrder);
                         stopOrderUpdateChecker();
-                        await loadOrderData();
-                        updateAdminStats();
-                        renderPendingOrders();
-                        renderVerifiedOrders();
-                        renderAllOrders();
-                    } else if (currentOrder.paymentStatus === 'processing') {
+                    } else if (currentOrder.status === 'processing') {
                         // Order is being processed
                         showPaymentVerifiedAwaitingAdmin(currentOrderId);
                     }
@@ -3821,267 +3816,306 @@
         }
 
         // ===== ADMIN PANEL FUNCTIONS =====
-        function updateAdminStats() {
-            const pendingCount = pendingOrders.filter(order => 
-                !order.paymentVerified && order.paymentMethod === 'Bank Transfer'
-            ).length;
-            
-            const verifiedCount = orders.filter(order => order.paymentVerified).length;
-            const totalOrders = orders.length + pendingOrders.length;
-            
-            const totalRevenue = [...orders, ...pendingOrders].reduce((total, order) => {
-                const orderTotal = parseFloat(order.total.replace('₦', '')) || 0;
-                return total + orderTotal;
-            }, 0);
+        async function updateAdminStats() {
+            try {
+                const allOrders = await window.cloudStorage.getOrders();
+                
+                const pendingCount = allOrders.filter(order => 
+                    order.status === 'pending' && !order.paymentVerified
+                ).length;
+                
+                const verifiedCount = allOrders.filter(order => 
+                    order.status === 'verified' || order.paymentVerified
+                ).length;
+                
+                const totalOrders = allOrders.length;
+                
+                const totalRevenue = allOrders.reduce((total, order) => {
+                    const orderTotal = parseFloat(order.total.replace(/[^0-9.-]+/g, "")) || 0;
+                    return total + orderTotal;
+                }, 0);
 
-            if (document.getElementById('pendingCount')) {
-                document.getElementById('pendingCount').textContent = pendingCount;
-                document.getElementById('verifiedCount').textContent = verifiedCount;
-                document.getElementById('totalOrders').textContent = totalOrders;
-                document.getElementById('totalRevenue').textContent = `$${totalRevenue.toFixed(2)}`;
+                if (document.getElementById('pendingCount')) {
+                    document.getElementById('pendingCount').textContent = pendingCount;
+                    document.getElementById('verifiedCount').textContent = verifiedCount;
+                    document.getElementById('totalOrders').textContent = totalOrders;
+                    document.getElementById('totalRevenue').textContent = `$${totalRevenue.toFixed(2)}`;
+                }
+            } catch (error) {
+                console.error('Failed to update admin stats:', error);
             }
         }
 
-        function renderPendingOrders() {
+        async function renderPendingOrders() {
             const container = document.getElementById('pendingOrdersList');
             if (!container) return;
 
-            const pendingBankTransferOrders = pendingOrders.filter(order => 
-                !order.paymentVerified && order.paymentMethod === 'Bank Transfer'
-            );
+            try {
+                const allOrders = await window.cloudStorage.getOrders();
+                const pendingBankTransferOrders = allOrders.filter(order => 
+                    order.status === 'pending' && !order.paymentVerified && order.paymentMethod === 'Bank Transfer'
+                );
 
-            if (pendingBankTransferOrders.length === 0) {
+                if (pendingBankTransferOrders.length === 0) {
+                    container.innerHTML = `
+                        <div class="table-row" style="text-align: center; padding: 40px;">
+                            <div style="grid-column: 1 / -1;">
+                                <i class="fas fa-clock" style="font-size: 48px; color: #fdcb6e; margin-bottom: 20px;"></i>
+                                <h3 style="color: #636e72;">No Pending Bank Transfer Orders</h3>
+                                <p style="color: #b2bec3;">All bank transfer orders have been verified.</p>
+                            </div>
+                        </div>
+                    `;
+                    return;
+                }
+
+                container.innerHTML = '';
+                pendingBankTransferOrders.forEach(order => {
+                    const orderRow = document.createElement('div');
+                    orderRow.className = 'table-row pending';
+                    orderRow.innerHTML = `
+                        <div>
+                            <span class="order-id">${order.orderId}</span>
+                        </div>
+                        <div class="order-customer">
+                            <span class="customer-name">${order.customerName}</span>
+                            <span class="customer-contact">
+                                <i class="fas fa-phone"></i> ${order.phone}
+                            </span>
+                        </div>
+                        <div class="order-total">${order.total}</div>
+                        <div>
+                            <span class="payment-method transfer">Bank Transfer</span>
+                        </div>
+                        <div>
+                            <span class="order-status pending">Pending</span>
+                        </div>
+                        <div class="order-time">${formatTime(order.orderTime)}</div>
+                        <div class="order-actions">
+                            <button class="btn-action btn-view" onclick="viewOrderDetails('${order.orderId}')">
+                                <i class="fas fa-eye"></i> View
+                            </button>
+                            <button class="btn-action btn-verify" onclick="verifyOrder('${order.orderId}')">
+                                <i class="fas fa-check"></i> Verify
+                            </button>
+                        </div>
+                    `;
+                    container.appendChild(orderRow);
+                });
+            } catch (error) {
+                console.error('Failed to render pending orders:', error);
                 container.innerHTML = `
                     <div class="table-row" style="text-align: center; padding: 40px;">
                         <div style="grid-column: 1 / -1;">
-                            <i class="fas fa-clock" style="font-size: 48px; color: #fdcb6e; margin-bottom: 20px;"></i>
-                            <h3 style="color: #636e72;">No Pending Bank Transfer Orders</h3>
-                            <p style="color: #b2bec3;">All bank transfer orders have been verified.</p>
+                            <i class="fas fa-exclamation-triangle" style="font-size: 48px; color: #e74c3c; margin-bottom: 20px;"></i>
+                            <h3 style="color: #636e72;">Error Loading Orders</h3>
+                            <p style="color: #b2bec3;">Please refresh the page.</p>
                         </div>
                     </div>
                 `;
-                return;
             }
-
-            container.innerHTML = '';
-            pendingBankTransferOrders.forEach(order => {
-                const orderRow = document.createElement('div');
-                orderRow.className = 'table-row pending';
-                orderRow.innerHTML = `
-                    <div>
-                        <span class="order-id">${order.orderId}</span>
-                    </div>
-                    <div class="order-customer">
-                        <span class="customer-name">${order.customerName}</span>
-                        <span class="customer-contact">
-                            <i class="fas fa-phone"></i> ${order.phone}
-                        </span>
-                    </div>
-                    <div class="order-total">${order.total}</div>
-                    <div>
-                        <span class="payment-method transfer">Bank Transfer</span>
-                    </div>
-                    <div>
-                        <span class="order-status pending">Pending</span>
-                    </div>
-                    <div class="order-time">${formatTime(order.orderTime)}</div>
-                    <div class="order-actions">
-                        <button class="btn-action btn-view" onclick="viewOrderDetails('${order.orderId}')">
-                            <i class="fas fa-eye"></i> View
-                        </button>
-                        <button class="btn-action btn-verify" onclick="verifyOrder('${order.orderId}')">
-                            <i class="fas fa-check"></i> Verify
-                        </button>
-                    </div>
-                `;
-                container.appendChild(orderRow);
-            });
         }
 
-        function renderVerifiedOrders() {
+        async function renderVerifiedOrders() {
             const container = document.getElementById('verifiedOrdersList');
             if (!container) return;
 
-            const verifiedOrdersList = orders.filter(order => order.paymentVerified);
+            try {
+                const allOrders = await window.cloudStorage.getOrders();
+                const verifiedOrdersList = allOrders.filter(order => 
+                    order.status === 'verified' || order.paymentVerified
+                );
 
-            if (verifiedOrdersList.length === 0) {
-                container.innerHTML = `
-                    <div class="table-row" style="text-align: center; padding: 40px;">
-                        <div style="grid-column: 1 / -1;">
-                            <i class="fas fa-check-circle" style="font-size: 48px; color: #00b894; margin-bottom: 20px;"></i>
-                            <h3 style="color: #636e72;">No Verified Orders Yet</h3>
-                            <p style="color: #b2bec3;">Verified orders will appear here.</p>
+                if (verifiedOrdersList.length === 0) {
+                    container.innerHTML = `
+                        <div class="table-row" style="text-align: center; padding: 40px;">
+                            <div style="grid-column: 1 / -1;">
+                                <i class="fas fa-check-circle" style="font-size: 48px; color: #00b894; margin-bottom: 20px;"></i>
+                                <h3 style="color: #636e72;">No Verified Orders Yet</h3>
+                                <p style="color: #b2bec3;">Verified orders will appear here.</p>
+                            </div>
                         </div>
-                    </div>
-                `;
-                return;
-            }
+                    `;
+                    return;
+                }
 
-            container.innerHTML = '';
-            verifiedOrdersList.forEach(order => {
-                const orderRow = document.createElement('div');
-                orderRow.className = 'table-row verified';
-                orderRow.innerHTML = `
-                    <div>
-                        <span class="order-id">${order.orderId}</span>
-                    </div>
-                    <div class="order-customer">
-                        <span class="customer-name">${order.customerName}</span>
-                        <span class="customer-contact">
-                            <i class="fas fa-phone"></i> ${order.phone}
-                        </span>
-                    </div>
-                    <div class="order-total">${order.total}</div>
-                    <div>
-                        <span class="payment-method ${order.paymentMethod === 'Card' ? 'card' : 'transfer'}">
-                            ${order.paymentMethod}
-                        </span>
-                    </div>
-                    <div>
-                        <span class="order-status verified">Verified</span>
-                    </div>
-                    <div class="order-time">${formatTime(order.orderTime)}</div>
-                    <div>
-                        <span class="order-id" style="background: rgba(0, 184, 148, 0.1); color: #00b894;">
-                            ${order.deliveryCode || 'N/A'}
-                        </span>
-                    </div>
-                `;
-                container.appendChild(orderRow);
-            });
+                container.innerHTML = '';
+                verifiedOrdersList.forEach(order => {
+                    const orderRow = document.createElement('div');
+                    orderRow.className = 'table-row verified';
+                    orderRow.innerHTML = `
+                        <div>
+                            <span class="order-id">${order.orderId}</span>
+                        </div>
+                        <div class="order-customer">
+                            <span class="customer-name">${order.customerName}</span>
+                            <span class="customer-contact">
+                                <i class="fas fa-phone"></i> ${order.phone}
+                            </span>
+                        </div>
+                        <div class="order-total">${order.total}</div>
+                        <div>
+                            <span class="payment-method ${order.paymentMethod === 'Card' ? 'card' : 'transfer'}">
+                                ${order.paymentMethod}
+                            </span>
+                        </div>
+                        <div>
+                            <span class="order-status verified">Verified</span>
+                        </div>
+                        <div class="order-time">${formatTime(order.orderTime)}</div>
+                        <div>
+                            <span class="order-id" style="background: rgba(0, 184, 148, 0.1); color: #00b894;">
+                                ${order.deliveryCode || 'N/A'}
+                            </span>
+                        </div>
+                    `;
+                    container.appendChild(orderRow);
+                });
+            } catch (error) {
+                console.error('Failed to render verified orders:', error);
+            }
         }
 
-        function renderAllOrders() {
+        async function renderAllOrders() {
             const container = document.getElementById('allOrdersList');
             if (!container) return;
 
-            const allOrders = [...orders, ...pendingOrders].sort((a, b) => 
-                new Date(b.orderTime) - new Date(a.orderTime)
-            );
+            try {
+                const allOrders = await window.cloudStorage.getOrders();
+                const sortedOrders = allOrders.sort((a, b) => 
+                    new Date(b.orderTime) - new Date(a.orderTime)
+                );
 
-            if (allOrders.length === 0) {
-                container.innerHTML = `
-                    <div class="table-row" style="text-align: center; padding: 40px;">
-                        <div style="grid-column: 1 / -1;">
-                            <i class="fas fa-shopping-cart" style="font-size: 48px; color: #0984e3; margin-bottom: 20px;"></i>
-                            <h3 style="color: #636e72;">No Orders Yet</h3>
-                            <p style="color: #b2bec3;">Customer orders will appear here.</p>
+                if (sortedOrders.length === 0) {
+                    container.innerHTML = `
+                        <div class="table-row" style="text-align: center; padding: 40px;">
+                            <div style="grid-column: 1 / -1;">
+                                <i class="fas fa-shopping-cart" style="font-size: 48px; color: #0984e3; margin-bottom: 20px;"></i>
+                                <h3 style="color: #636e72;">No Orders Yet</h3>
+                                <p style="color: #b2bec3;">Customer orders will appear here.</p>
+                            </div>
                         </div>
-                    </div>
-                `;
-                return;
-            }
+                    `;
+                    return;
+                }
 
-            container.innerHTML = '';
-            allOrders.forEach(order => {
-                const isVerified = order.paymentVerified;
-                const orderRow = document.createElement('div');
-                orderRow.className = `table-row ${isVerified ? 'verified' : 'pending'}`;
-                orderRow.innerHTML = `
-                    <div>
-                        <span class="order-id">${order.orderId}</span>
-                    </div>
-                    <div class="order-customer">
-                        <span class="customer-name">${order.customerName}</span>
-                        <span class="customer-contact">
-                            <i class="fas fa-phone"></i> ${order.phone}
-                        </span>
-                    </div>
-                    <div class="order-total">${order.total}</div>
-                    <div>
-                        <span class="payment-method ${order.paymentMethod === 'Card' ? 'card' : 'transfer'}">
-                            ${order.paymentMethod}
-                        </span>
-                    </div>
-                    <div>
-                        <span class="order-status ${isVerified ? 'verified' : 'pending'}">
-                            ${isVerified ? 'Verified' : 'Pending'}
-                        </span>
-                    </div>
-                    <div class="order-time">${formatTime(order.orderTime)}</div>
-                    <div class="order-actions">
-                        <button class="btn-action btn-view" onclick="viewOrderDetails('${order.orderId}')">
-                            <i class="fas fa-eye"></i> View
-                        </button>
-                        ${!isVerified ? `
-                            <button class="btn-action btn-delete" onclick="deleteOrder('${order.orderId}')">
-                                <i class="fas fa-trash"></i> Delete
+                container.innerHTML = '';
+                sortedOrders.forEach(order => {
+                    const isVerified = order.status === 'verified' || order.paymentVerified;
+                    const orderRow = document.createElement('div');
+                    orderRow.className = `table-row ${isVerified ? 'verified' : 'pending'}`;
+                    orderRow.innerHTML = `
+                        <div>
+                            <span class="order-id">${order.orderId}</span>
+                        </div>
+                        <div class="order-customer">
+                            <span class="customer-name">${order.customerName}</span>
+                            <span class="customer-contact">
+                                <i class="fas fa-phone"></i> ${order.phone}
+                            </span>
+                        </div>
+                        <div class="order-total">${order.total}</div>
+                        <div>
+                            <span class="payment-method ${order.paymentMethod === 'Card' ? 'card' : 'transfer'}">
+                                ${order.paymentMethod}
+                            </span>
+                        </div>
+                        <div>
+                            <span class="order-status ${isVerified ? 'verified' : 'pending'}">
+                                ${isVerified ? 'Verified' : 'Pending'}
+                            </span>
+                        </div>
+                        <div class="order-time">${formatTime(order.orderTime)}</div>
+                        <div class="order-actions">
+                            <button class="btn-action btn-view" onclick="viewOrderDetails('${order.orderId}')">
+                                <i class="fas fa-eye"></i> View
                             </button>
-                        ` : ''}
-                    </div>
-                `;
-                container.appendChild(orderRow);
-            });
+                            ${!isVerified ? `
+                                <button class="btn-action btn-delete" onclick="deleteOrder('${order.orderId}')">
+                                    <i class="fas fa-trash"></i> Delete
+                                </button>
+                            ` : ''}
+                        </div>
+                    `;
+                    container.appendChild(orderRow);
+                });
+            } catch (error) {
+                console.error('Failed to render all orders:', error);
+            }
         }
 
-        function viewOrderDetails(orderId) {
+        async function viewOrderDetails(orderId) {
             currentAdminViewOrderId = orderId;
             
-            // Find order in either pendingOrders or orders
-            let order = pendingOrders.find(o => o.orderId === orderId);
-            if (!order) {
-                order = orders.find(o => o.orderId === orderId);
+            try {
+                const allOrders = await window.cloudStorage.getOrders();
+                const order = allOrders.find(o => o.orderId === orderId);
+
+                if (!order) {
+                    alert('Order not found!');
+                    return;
+                }
+
+                // Populate order details
+                document.getElementById('detailOrderId').textContent = order.orderId;
+                document.getElementById('detailCustomerName').textContent = order.customerName;
+                document.getElementById('detailCustomerPhone').textContent = order.phone;
+                document.getElementById('detailCustomerEmail').textContent = order.email;
+                document.getElementById('detailCustomerAddress').textContent = order.address;
+                document.getElementById('detailPaymentMethod').textContent = order.paymentMethod;
+                document.getElementById('detailPaymentStatus').textContent = order.paymentVerified ? 'Verified' : 'Pending';
+                document.getElementById('detailOrderTime').textContent = formatDateTime(order.orderTime);
+                document.getElementById('detailDeliveryCode').textContent = order.deliveryCode || 'Not Generated';
+                document.getElementById('detailTotalAmount').textContent = order.total;
+
+                // Populate order items
+                const itemsList = document.getElementById('detailItemsList');
+                itemsList.innerHTML = '';
+                if (order.items && order.items.length > 0) {
+                    order.items.forEach(item => {
+                        const itemTotal = item.price * item.quantity;
+                        const itemRow = document.createElement('div');
+                        itemRow.className = 'item-row';
+                        itemRow.innerHTML = `
+                            <div>
+                                <div class="item-name">${item.name}</div>
+                                <div class="item-quantity">Quantity: ${item.quantity}</div>
+                            </div>
+                            <div class="item-price">$${itemTotal.toFixed(2)}</div>
+                        `;
+                        itemsList.appendChild(itemRow);
+                    });
+                }
+
+                // Show/hide payment proof section
+                const paymentProofSection = document.getElementById('paymentProofSection');
+                const paymentProofImage = document.getElementById('paymentProofImage');
+                
+                if (order.paymentProof) {
+                    paymentProofSection.style.display = 'block';
+                    paymentProofImage.src = order.paymentProof;
+                    paymentProofImage.onclick = () => {
+                        previewImage.src = order.paymentProof;
+                        imagePreviewModal.classList.add('active');
+                    };
+                } else {
+                    paymentProofSection.style.display = 'none';
+                }
+
+                // Show/hide action buttons based on order status
+                const actionButtons = document.getElementById('detailActionButtons');
+                if (order.paymentVerified || order.paymentMethod === 'Card') {
+                    actionButtons.style.display = 'none';
+                } else {
+                    actionButtons.style.display = 'block';
+                }
+
+                // Show order details modal
+                orderDetailsModal.classList.add('active');
+            } catch (error) {
+                console.error('Failed to view order details:', error);
+                alert('Error loading order details. Please try again.');
             }
-
-            if (!order) {
-                alert('Order not found!');
-                return;
-            }
-
-            // Populate order details
-            document.getElementById('detailOrderId').textContent = order.orderId;
-            document.getElementById('detailCustomerName').textContent = order.customerName;
-            document.getElementById('detailCustomerPhone').textContent = order.phone;
-            document.getElementById('detailCustomerEmail').textContent = order.email;
-            document.getElementById('detailCustomerAddress').textContent = order.address;
-            document.getElementById('detailPaymentMethod').textContent = order.paymentMethod;
-            document.getElementById('detailPaymentStatus').textContent = order.paymentVerified ? 'Verified' : 'Pending';
-            document.getElementById('detailOrderTime').textContent = formatDateTime(order.orderTime);
-            document.getElementById('detailDeliveryCode').textContent = order.deliveryCode || 'Not Generated';
-            document.getElementById('detailTotalAmount').textContent = order.total;
-
-            // Populate order items
-            const itemsList = document.getElementById('detailItemsList');
-            itemsList.innerHTML = '';
-            order.items.forEach(item => {
-                const itemTotal = item.price * item.quantity;
-                const itemRow = document.createElement('div');
-                itemRow.className = 'item-row';
-                itemRow.innerHTML = `
-                    <div>
-                        <div class="item-name">${item.name}</div>
-                        <div class="item-quantity">Quantity: ${item.quantity}</div>
-                    </div>
-                    <div class="item-price">$${itemTotal.toFixed(2)}</div>
-                `;
-                itemsList.appendChild(itemRow);
-            });
-
-            // Show/hide payment proof section
-            const paymentProofSection = document.getElementById('paymentProofSection');
-            const paymentProofImage = document.getElementById('paymentProofImage');
-            
-            if (order.paymentProof) {
-                paymentProofSection.style.display = 'block';
-                paymentProofImage.src = order.paymentProof;
-                paymentProofImage.onclick = () => {
-                    previewImage.src = order.paymentProof;
-                    imagePreviewModal.classList.add('active');
-                };
-            } else {
-                paymentProofSection.style.display = 'none';
-            }
-
-            // Show/hide action buttons based on order status
-            const actionButtons = document.getElementById('detailActionButtons');
-            if (order.paymentVerified || order.paymentMethod === 'Card') {
-                actionButtons.style.display = 'none';
-            } else {
-                actionButtons.style.display = 'block';
-            }
-
-            // Show order details modal
-            orderDetailsModal.classList.add('active');
         }
 
         async function verifyOrder(orderId) {
@@ -4093,40 +4127,39 @@
             const deliveryCode = Math.floor(1000 + Math.random() * 9000).toString();
             
             // Update in cloud storage
-            const success = await window.cloudStorage.updateOrderStatus(
-                orderId, 
-                'verified', 
-                deliveryCode
-            );
-            
-            if (success) {
-                // Update local arrays
-                await loadOrderData();
+            try {
+                const success = await window.cloudStorage.updateOrderStatus(
+                    orderId, 
+                    'verified', 
+                    deliveryCode
+                );
                 
-                // Update UI
-                updateAdminStats();
-                renderPendingOrders();
-                renderVerifiedOrders();
-                renderAllOrders();
-                
-                // Close details modal if open
-                orderDetailsModal.classList.remove('active');
-                
-                // Show success message
-                showToast('success', 'Order Verified', `Delivery code generated: ${deliveryCode}`);
-                
-                // Show sync notification
-                window.cloudStorage.showSyncNotification();
-                
-                // Update customer's view if they're still on the checkout page
-                if (window.updateCustomerDeliveryCode) {
-                    const allOrders = await window.cloudStorage.getOrders();
-                    const order = allOrders.find(o => o.orderId === orderId);
-                    if (order) {
-                        window.updateCustomerDeliveryCode(order, deliveryCode);
+                if (success) {
+                    // Update UI
+                    await updateAdminPanel();
+                    
+                    // Close details modal if open
+                    orderDetailsModal.classList.remove('active');
+                    
+                    // Show success message
+                    showToast('success', 'Order Verified', `Delivery code generated: ${deliveryCode}`);
+                    
+                    // Show sync notification
+                    window.cloudStorage.showSyncNotification();
+                    
+                    // Update customer's view if they're still on the checkout page
+                    if (window.updateCustomerDeliveryCode) {
+                        const allOrders = await window.cloudStorage.getOrders();
+                        const order = allOrders.find(o => o.orderId === orderId);
+                        if (order) {
+                            window.updateCustomerDeliveryCode(order, deliveryCode);
+                        }
                     }
+                } else {
+                    showToast('error', 'Error', 'Failed to verify order. Please try again.');
                 }
-            } else {
+            } catch (error) {
+                console.error('Failed to verify order:', error);
                 showToast('error', 'Error', 'Failed to verify order. Please try again.');
             }
         }
@@ -4136,23 +4169,22 @@
                 return;
             }
 
-            // Delete from cloud storage
             try {
-                await window.cloudStorage.deleteOrder(orderId);
+                // Delete from cloud storage
+                const success = await window.cloudStorage.deleteOrder(orderId);
                 
-                // Update local arrays
-                await loadOrderData();
-                
-                // Update UI
-                updateAdminStats();
-                renderPendingOrders();
-                renderVerifiedOrders();
-                renderAllOrders();
-                
-                // Close details modal if open
-                orderDetailsModal.classList.remove('active');
-                
-                showToast('success', 'Order Deleted', 'Order has been deleted successfully!');
+                if (success) {
+                    // Update UI
+                    await updateAdminPanel();
+                    
+                    // Close details modal if open
+                    orderDetailsModal.classList.remove('active');
+                    
+                    // Show success message
+                    showToast('success', 'Order Deleted', 'Order has been deleted successfully!');
+                } else {
+                    showToast('error', 'Error', 'Failed to delete order. Please try again.');
+                }
             } catch (error) {
                 console.error('Failed to delete order:', error);
                 showToast('error', 'Error', 'Failed to delete order. Please try again.');
@@ -4164,6 +4196,109 @@
             
             if (confirm('Are you sure you want to reject this order? This will delete the order.')) {
                 await deleteOrder(currentAdminViewOrderId);
+            }
+        }
+
+        // ===== CLOUD STORAGE INTEGRATION FUNCTIONS =====
+        async function processOrderSubmission(orderData, paymentMethod) {
+            // Set order status
+            orderData.status = paymentMethod === 'Card' ? 'verified' : 'pending';
+            orderData.paymentMethod = paymentMethod;
+            
+            // Generate order ID if not exists
+            if (!orderData.orderId) {
+                orderData.orderId = 'TB' + Date.now() + Math.floor(Math.random() * 1000);
+            }
+            
+            // For card payments, generate delivery code immediately
+            if (paymentMethod === 'Card') {
+                const deliveryCode = Math.floor(1000 + Math.random() * 9000).toString();
+                orderData.deliveryCode = deliveryCode;
+                orderData.paymentVerified = true;
+            }
+            
+            // Save to cloud storage
+            try {
+                await window.cloudStorage.saveOrder(orderData);
+                console.log('Order saved to cloud:', orderData.orderId);
+            } catch (error) {
+                console.error('Failed to save order:', error);
+                showToast('error', 'Storage Error', 'Failed to save order. Please try again.');
+                return;
+            }
+            
+            // Show appropriate state
+            if (paymentMethod === 'Card') {
+                showPaymentState(paymentProcessing);
+                updateProgressSteps(1);
+                
+                setTimeout(() => {
+                    // Show delivery code for card payments
+                    showDeliveryCodeToCustomer(orderData);
+                    
+                    // Update admin panel
+                    updateAdminPanel();
+                }, 3000);
+            } else {
+                // For bank transfers
+                showPaymentState(paymentPending);
+                updateProgressSteps(1);
+                
+                document.getElementById('pendingOrderId').textContent = orderData.orderId;
+                currentOrderId = orderData.orderId;
+                sessionStorage.setItem('currentOrderId', orderData.orderId);
+                
+                // Start checking for updates
+                startOrderUpdateChecker();
+                
+                // Update admin panel
+                updateAdminPanel();
+            }
+            
+            // Clear cart
+            cart = [];
+            localStorage.setItem('cart', JSON.stringify(cart));
+            updateCartCount();
+            renderOrderSummary();
+        }
+
+        async function updateAdminPanel() {
+            if (isAdminLoggedIn) {
+                await updateAdminStats();
+                await renderPendingOrders();
+                await renderVerifiedOrders();
+                await renderAllOrders();
+            }
+        }
+
+        async function loadOrderData() {
+            try {
+                const allOrders = await window.cloudStorage.getOrders();
+                
+                // Split into pending and verified orders for backward compatibility
+                pendingOrders = allOrders.filter(order => 
+                    order.status === 'pending' && !order.paymentVerified
+                );
+                
+                orders = allOrders.filter(order => 
+                    order.status === 'verified' || order.paymentVerified
+                );
+                
+                console.log('Orders loaded:', allOrders.length);
+                console.log('Pending:', pendingOrders.length);
+                console.log('Verified:', orders.length);
+            } catch (error) {
+                console.error('Failed to load orders:', error);
+            }
+        }
+
+        // Start auto-refresh for admin panel
+        function startAutoRefresh() {
+            if (isAdminLoggedIn) {
+                setInterval(async () => {
+                    await updateAdminPanel();
+                    console.log('Admin panel auto-refreshed');
+                }, 5000); // Refresh every 5 seconds
             }
         }
 
@@ -5064,155 +5199,8 @@
 
         function checkOrderInProgress() {
             if (currentOrderId) {
-                const pendingOrder = pendingOrders.find(o => o.orderId === currentOrderId);
-                const completedOrder = orders.find(o => o.orderId === currentOrderId);
-
-                if (completedOrder && completedOrder.paymentVerified) {
-                    // Order is already complete
-                } else if (pendingOrder) {
-                    // Order is still pending
-                }
-            }
-        }
-
-        // ===== CLOUD STORAGE FUNCTIONS =====
-        
-        // Load order data from cloud storage
-        async function loadOrderData() {
-            try {
-                // Check if cloud storage is available
-                if (!window.cloudStorage) {
-                    console.warn('Cloud storage not available, using localStorage');
-                    
-                    // Fallback to localStorage
-                    const pendingOrdersData = JSON.parse(localStorage.getItem('pendingOrders')) || [];
-                    const ordersData = JSON.parse(localStorage.getItem('orders')) || [];
-                    
-                    pendingOrders = pendingOrdersData;
-                    orders = ordersData;
-                    return;
-                }
-                
-                const allOrders = await window.cloudStorage.getOrders();
-                
-                // Split into pending and verified orders
-                pendingOrders = allOrders.filter(order => 
-                    order.status === 'pending' && !order.paymentVerified
-                );
-                
-                orders = allOrders.filter(order => 
-                    order.status === 'verified' || order.paymentVerified
-                );
-                
-                console.log('Orders loaded:', allOrders.length);
-                console.log('Pending:', pendingOrders.length);
-                console.log('Verified:', orders.length);
-            } catch (error) {
-                console.error('Failed to load orders:', error);
-                
-                // Fallback to localStorage on error
-                const pendingOrdersData = JSON.parse(localStorage.getItem('pendingOrders')) || [];
-                const ordersData = JSON.parse(localStorage.getItem('orders')) || [];
-                
-                pendingOrders = pendingOrdersData;
-                orders = ordersData;
-            }
-        }
-
-        // Process order submission with cloud storage
-        async function processOrderSubmission(orderData, paymentMethod) {
-            // Set order status
-            orderData.status = paymentMethod === 'Card' ? 'verified' : 'pending';
-            orderData.paymentMethod = paymentMethod;
-            
-            // Generate order ID if not exists
-            if (!orderData.orderId) {
-                orderData.orderId = 'TB' + Date.now() + Math.floor(Math.random() * 1000);
-            }
-            
-            // For card payments, generate delivery code immediately
-            if (paymentMethod === 'Card') {
-                const deliveryCode = Math.floor(1000 + Math.random() * 9000).toString();
-                orderData.deliveryCode = deliveryCode;
-                orderData.paymentVerified = true;
-            }
-            
-            // Save to cloud storage
-            try {
-                // Try cloud storage first
-                if (window.cloudStorage) {
-                    await window.cloudStorage.saveOrder(orderData);
-                    console.log('Order saved to cloud:', orderData.orderId);
-                } else {
-                    // Fallback to localStorage
-                    if (paymentMethod === 'Card') {
-                        orders.push(orderData);
-                        localStorage.setItem('orders', JSON.stringify(orders));
-                    } else {
-                        pendingOrders.push(orderData);
-                        localStorage.setItem('pendingOrders', JSON.stringify(pendingOrders));
-                    }
-                    console.log('Order saved to localStorage:', orderData.orderId);
-                }
-            } catch (error) {
-                console.error('Failed to save order:', error);
-                showToast('error', 'Storage Error', 'Failed to save order. Please try again.');
+                // This function is now handled by checkForOrderUpdates which uses cloud storage
                 return;
-            }
-            
-            // Show appropriate state
-            if (paymentMethod === 'Card') {
-                showPaymentState(paymentProcessing);
-                updateProgressSteps(1);
-                
-                setTimeout(() => {
-                    // Show delivery code for card payments
-                    showDeliveryCodeToCustomer(orderData);
-                    
-                    // Update admin panel
-                    updateAdminPanel();
-                }, 3000);
-            } else {
-                // For bank transfers
-                showPaymentState(paymentPending);
-                updateProgressSteps(1);
-                
-                document.getElementById('pendingOrderId').textContent = orderData.orderId;
-                currentOrderId = orderData.orderId;
-                sessionStorage.setItem('currentOrderId', orderData.orderId);
-                
-                // Start checking for updates
-                startOrderUpdateChecker();
-                
-                // Update admin panel
-                updateAdminPanel();
-            }
-            
-            // Clear cart
-            cart = [];
-            localStorage.setItem('cart', JSON.stringify(cart));
-            updateCartCount();
-            renderOrderSummary();
-        }
-
-        // Update the updateAdminPanel function:
-        async function updateAdminPanel() {
-            if (isAdminLoggedIn) {
-                await loadOrderData();
-                updateAdminStats();
-                renderPendingOrders();
-                renderVerifiedOrders();
-                renderAllOrders();
-            }
-        }
-
-        // Start auto-refresh for admin panel
-        function startAutoRefresh() {
-            if (isAdminLoggedIn) {
-                setInterval(async () => {
-                    await updateAdminPanel();
-                    console.log('Admin panel auto-refreshed');
-                }, 5000); // Refresh every 5 seconds
             }
         }
 
@@ -5234,15 +5222,6 @@
                 showDeliveryCodeToCustomer(order);
                 stopOrderUpdateChecker();
             }
-            
-            // Update localStorage
-            const updatedOrders = JSON.parse(localStorage.getItem('orders')) || [];
-            const orderIndex = updatedOrders.findIndex(o => o.orderId === order.orderId);
-            
-            if (orderIndex !== -1) {
-                updatedOrders[orderIndex].deliveryCode = deliveryCode;
-                localStorage.setItem('orders', JSON.stringify(updatedOrders));
-            }
         };
 
         // ===== INITIALIZATION =====
@@ -5250,7 +5229,6 @@
             // Initialize cloud storage
             if (window.cloudStorage) {
                 await window.cloudStorage.init();
-                window.cloudStorage.setupCrossTabSync();
             }
 
             // Initialize admin credentials if not exists
@@ -5268,17 +5246,18 @@
                 localStorage.setItem('announcements', JSON.stringify(announcements));
             }
 
-            // Load initial order data
-            await loadOrderData();
-            
             // Load initial data
             updateCartCount();
             renderOrderSummary();
             checkOrderInProgress();
-            updateAdminStats();
-            renderPendingOrders();
-            renderVerifiedOrders();
-            renderAllOrders();
+            
+            // Load order data from cloud storage
+            await loadOrderData();
+            
+            // Update admin panel if logged in
+            if (isAdminLoggedIn) {
+                await updateAdminPanel();
+            }
 
             // Initialize website announcement banner
             updateWebsiteAnnouncement();
@@ -5346,9 +5325,6 @@
                 showToast('success', 'Welcome to TastyBites!', 'Order delicious food delivered right to your door!');
             }, 1000);
 
-            // Start auto-refresh for admin panel
-            startAutoRefresh();
-
             // ===== EVENT LISTENERS =====
             // Navigation
             navLinks.forEach(link => {
@@ -5409,7 +5385,7 @@
                     loginModal.classList.add('active');
                 } else {
                     adminPanel.classList.add('active');
-                    updateAdminPanel(); // Refresh data when opening admin panel
+                    updateAdminPanel();
                 }
             });
 
@@ -5438,12 +5414,15 @@
                     loginModal.classList.remove('active');
                     adminPanel.classList.add('active');
                     
-                    // Load fresh data
-                    updateAdminPanel();
-                    
                     // Clear form
                     adminLoginForm.reset();
                     loginError.classList.remove('active');
+                    
+                    // Load and display orders
+                    updateAdminPanel();
+                    
+                    // Start auto-refresh
+                    startAutoRefresh();
                     
                     // Show welcome message
                     showToast('success', 'Admin Access Granted', 'Welcome to TastyBites Admin Panel!');
@@ -5698,6 +5677,7 @@
         `;
         document.head.appendChild(style);
     </script>
+
     <script src="/script.js"></script>
     <script src="admin.js"></script>
     <!-- Add this line BEFORE your main script tag -->
